@@ -154,7 +154,7 @@ svg .ln{fill:none;stroke-width:1.6;vector-effect:non-scaling-stroke}
 (function () {
 
 var LS_STATE = 'twstock.state.v1';
-var LS_DATA  = 'twstock.data.v1';
+var LS_DATA  = 'twstock.data.v2';   // v2：法人彙總新增最近一日的外資/投信分項
 var storageOK = true;
 
 function lsGet(key, def) {
@@ -460,9 +460,11 @@ function aggregateChips(days) {
     for (var code in map) {
       if (!Object.prototype.hasOwnProperty.call(map, code)) continue;
       var v = map[code];
-      var a = agg[code] || (agg[code] = { f: 0, t: 0, d: 0, seq: [], name: v.name });
+      var a = agg[code] || (agg[code] = { f: 0, t: 0, d: 0, seq: [], seqF: [], seqT: [], name: v.name });
       a.f += v.f; a.t += v.t; a.d += v.d;
-      a.seq.push(v.f + v.t);                               // 舊 → 新
+      a.seq.push(v.f + v.t);                               // 舊 → 新（合計）
+      a.seqF.push(v.f);
+      a.seqT.push(v.t);
     }
   }
   var out = {};
@@ -480,6 +482,8 @@ function aggregateChips(days) {
     out[c] = {
       name: a.name,
       f5: a.f, t5: a.t, d5: a.d, i5: a.f + a.t,
+      f1: a.seqF.length ? a.seqF[a.seqF.length - 1] : 0,   // 最近一日外資
+      t1: a.seqT.length ? a.seqT[a.seqT.length - 1] : 0,   // 最近一日投信
       last: a.seq.length ? a.seq[a.seq.length - 1] : 0,
       streak: streak, negStreak: negStreak, days: a.seq.length, seq: a.seq
     };
@@ -1305,8 +1309,8 @@ function openDetail(code) {
     var c = a.chip;
     o.push('<details class="dt"><summary>法人籌碼</summary><div style="margin-top:8px"><table class="t toCards"><tbody>');
     if (c) {
-      o.push(row2('外資買賣超（當日）', T.fmt(c.f / 1000, 0) + ' 張', T.cls(c.f)));
-      o.push(row2('投信買賣超（當日）', T.fmt(c.t / 1000, 0) + ' 張', T.cls(c.t)));
+      o.push(row2('外資買賣超（最近一日）', T.fmt(c.f1 / 1000, 0) + ' 張', T.cls(c.f1)));
+      o.push(row2('投信買賣超（最近一日）', T.fmt(c.t1 / 1000, 0) + ' 張', T.cls(c.t1)));
       o.push(row2('外資＋投信 5 日合計', T.fmt(c.i5 / 1000, 0) + ' 張（約 ' + T.fmtMoney(a.close * c.i5) + '）', T.cls(c.i5)));
       o.push(row2('連續買超 / 賣超', c.streak + ' 日 / ' + c.negStreak + ' 日', ''));
       o.push(row2('自營商 5 日', T.fmt(c.d5 / 1000, 0) + ' 張', T.cls(c.d5)));
