@@ -2084,8 +2084,12 @@ function heat(tiles) {
   return s;
 }
 function shortInd(x) {
-  return String(x || '').replace('業', '').replace('工業', '').replace('電子零組件', '電子零件')
-    .replace('電腦及週邊設備', '電腦週邊').replace('金融保險', '金融').replace('其他', '其他');
+  return String(x || '')
+    .replace('電子零組件', '電子零件')
+    .replace('電腦及週邊設備', '電腦週邊')
+    .replace('金融保險', '金融')
+    .replace(/工業$/, '')
+    .replace(/業$/, '');
 }
 
 /* ---------------- 相對強度（RS）線 ---------------- */
@@ -2105,7 +2109,7 @@ function rsline(points) {
   var s = '<svg viewBox="0 0 ' + W + ' ' + H + '" class="chart">';
   if (y100 > 6 && y100 < H - 4) s += '<line x1="' + pad + '" y1="' + n1(y100) + '" x2="' + (W - pad) + '" y2="' + n1(y100) + '" stroke="' + C_GRID + '" stroke-dasharray="4 4"/>';
   s += '<path d="' + d + '" fill="none" stroke="' + col + '" stroke-width="1.8"/>';
-  s += '<text x="' + pad + '" y="10" class="ct" font-size="9">相對大盤強度（100＝與大盤同步）</text>';
+  s += '<text x="' + pad + '" y="10" class="ct" font-size="9">相對強度（100＝與大盤同步）</text>';
   s += '</svg>';
   return s;
 }
@@ -2484,7 +2488,7 @@ function pickRow(r, withAdd) {
     (r.vlabel ? pill(r.vlabel, tone === 'up' ? 'buy' : tone === 'mut' ? '' : 'hold') : '') + '</div></div>' +
     '<div class="r"><div class="px ' + toneCls(r.pct) + '">' + T.fmtPx(r.close) + '</div>' +
     '<div class="tiny ' + toneCls(r.pct) + '">' + T.fmtPct(r.pct) + '</div>' +
-    '<div class="tiny mut2">' + (r.plan ? '停損 ' + T.fmtPx(r.plan.stop) : '') + '</div></div></div>';
+    '<div class="tiny mut2">' + (isFinite(r.stop) ? '停損 ' + T.fmtPx(r.stop) : '') + '</div></div></div>';
   return h;
 }
 
@@ -2640,7 +2644,7 @@ function openDetail(code) {
     vd.risk.map(function (t) { return '<li>' + T.esc(t) + '</li>'; }).join('') + '</ul></div></div>';
 
   /* 2. 評分儀表 + 五力 */
-  h += '<div class="card"><div class="mut sm" style="margin-bottom:2px">技術評分儀表</div>' + CH.gauge(vd.parts.tech) +
+  h += '<div class="card"><div class="mut sm" style="margin-bottom:2px">綜合評分儀表</div>' + CH.gauge(vd.total) +
     '<div class="grid4 tiny" style="margin-top:6px">' +
     subScore('技術', vd.parts.tech) + subScore('籌碼', vd.parts.chip) + subScore('基本面', vd.parts.fund) + subScore('風險', vd.parts.risk) + '</div>' +
     '<div class="hr"></div><div class="mut sm">五力評估（雪花圖）：看哪一項強、哪一項弱</div>' + CH.radar(snow.axes) +
