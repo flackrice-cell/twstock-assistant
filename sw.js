@@ -1,5 +1,5 @@
 /* PWA service worker：離線開啟外殼（外部行情 API 一律走網路） */
-var CACHE = 'twstock-v3';
+var CACHE = 'twstock-v4';
 var ASSETS = ['./', './index.html', './manifest.json', './icon-192.png', './icon-512.png'];
 
 self.addEventListener('install', function (e) {
