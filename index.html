@@ -815,7 +815,7 @@ function analyze(code, rows, chip) {
 
 /* ---------------- 評分（0–100） ---------------- */
 function scoreOf(a) {
-  var p = { trend: 0, mom: 0, chip: 0, vol: 0 }, tags = [];
+  var p = { trend: 0, mom: 0, chip: 0, vol: 0 }, tags = [], warns = [];
   /* 趨勢 30 */
   if (a.close > a.ma20) { p.trend += 8; tags.push('站上月線'); }
   if (a.ma20 > a.ma60) { p.trend += 7; tags.push('月線>季線'); }
@@ -850,14 +850,15 @@ function scoreOf(a) {
   if (a.dayPct > 0 && a.volR > 1.2) { p.vol += 6; tags.push('價漲量增'); }
   if (a.closePos >= 0.7) p.vol += 3;
   if (isFinite(a.bias20) && a.bias20 < 12) p.vol += 3;
-  else tags.push('乖離偏大');
-  if (a.dayPct >= 7) tags.push('今日急漲，等回測再進');
+  else warns.push('乖離偏大');
+  if (a.dayPct >= 7) warns.push('今日急漲，等回測再進');
+  if (a.volR < 0.6) warns.push('量能萎縮');
   var raw = p.trend + p.mom + p.chip + p.vol;
   /* 沒有法人資料（例如上櫃股、當日未公布）時，把其餘項目等比放大，避免分數被低估 */
   var maxAvail = 75 + (a.chip ? 25 : 0);
   var score = Math.max(0, Math.min(100, Math.round(raw / maxAvail * 100)));
   var grade = score >= 75 ? '強勢' : score >= 60 ? '偏多' : score >= 45 ? '中性' : '偏弱';
-  return { score: score, parts: p, tags: tags, grade: grade, raw: raw, maxAvail: maxAvail };
+  return { score: score, parts: p, tags: tags, warns: warns, grade: grade, raw: raw, maxAvail: maxAvail };
 }
 
 /* ---------------- 停損停利與部位 ---------------- */
@@ -1174,7 +1175,9 @@ function pickRow(it, rank) {
     '<div class="l">' +
     '<div class="nm">' + (rank ? '<span class="mut">' + rank + '. </span>' : '') + T.esc(nameOf(it.code)) +
     ' <span class="cd">' + T.esc(it.code) + '</span></div>' +
-    '<div style="margin:4px 0 2px">' + sc.tags.slice(0, 3).map(function (t) { return '<span class="pill buy">' + T.esc(t) + '</span>'; }).join('') + '</div>' +
+    '<div style="margin:4px 0 2px">' +
+    (sc.warns || []).slice(0, 2).map(function (t) { return '<span class="pill warnp">' + T.esc(t) + '</span>'; }).join('') +
+    sc.tags.slice(0, 3).map(function (t) { return '<span class="pill buy">' + T.esc(t) + '</span>'; }).join('') + '</div>' +
     '<div class="cd" style="font-size:12px">進場 ' + T.fmtPx(plan.entry) + '・停損 <span class="dn">' + T.fmtPx(plan.stop) +
     '</span>（' + T.fmt(plan.distPct, 1) + '%' + (plan.distPct >= S.cfg.maxStopPct - 0.05 ? '，波動大已用上限' : '') + '）・目標 ' + T.fmtPx(plan.t1) + '</div>' +
     '<div class="cd" style="font-size:12px">建議 ' + T.esc(lotsText(plan.shares)) + '・風險 ' + T.fmtMoney(plan.riskAmt) + '</div>' +
@@ -1312,7 +1315,9 @@ function openDetail(code) {
     }
     o.push('</tbody></table></div></details>');
     if (a.gapWarn) o.push('<div class="hint warn" style="margin-top:8px">近 60 日出現單日大跌超過 12%，可能是除權息造成，均線與停損價會失真，請自行確認。</div>');
-    o.push('<div class="row wrap" style="margin:10px 0 4px">' + sc.tags.map(function (t) { return '<span class="pill">' + T.esc(t) + '</span>'; }).join('') + '</div>');
+    o.push('<div class="row wrap" style="margin:10px 0 4px">' +
+      (sc.warns || []).map(function (t) { return '<span class="pill warnp">' + T.esc(t) + '</span>'; }).join('') +
+      sc.tags.map(function (t) { return '<span class="pill">' + T.esc(t) + '</span>'; }).join('') + '</div>');
   } else {
     o.push('<div class="hint warn">尚無歷史 K 線資料，只能顯示當日行情。可在設定按「更新資料」後再開。</div>');
   }
@@ -1441,7 +1446,7 @@ function scan() {
           if (plan.distPct > S.cfg.maxStopPct) return;
           items.push({
             code: code, close: a.close, dayPct: a.dayPct,
-            score: { score: sc.score, grade: sc.grade, tags: sc.tags.slice(0, 4) },
+            score: { score: sc.score, grade: sc.grade, tags: sc.tags.slice(0, 4), warns: (sc.warns || []).slice(0, 2) },
             plan: { entry: plan.entry, pullback: plan.pullback, stop: plan.stop, dist: plan.dist,
                     distPct: plan.distPct, t1: plan.t1, t2: plan.t2, hi60: plan.hi60,
                     shares: plan.shares, riskAmt: plan.riskAmt }
