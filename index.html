@@ -973,23 +973,25 @@ function fetchIntl(force) {
     var out = { at: Date.now(), items: list, src: 'Yahoo Finance（延遲約 15 分鐘）' };
     out.byKey = {};
     list.forEach(function (x) { out.byKey[x.k] = x; });
-    /* 費半與台股的連動係數（用近 60 個共同交易日） */
+    /* 費半與台股的連動係數（近 60 個共同交易日）：大盤 & 台積電各算一次 */
     try { out.link = indexLink(out.byKey.SOX); } catch (e) { out.link = null; }
+    try { out.linkStock = stockLink(out.byKey.SOX, '2330'); } catch (e) { out.linkStock = null; }
+    out.byKey = out.byKey || {};
     DCACHE.intl = out; DCACHE.intlDay = DCACHE.day;
     T.saveData();
     return out;
   });
 }
-function indexLink(intl) {
-  if (!intl || !intl.ok || !DCACHE.series || !DCACHE.series.length) return null;
-  var idx = {};
-  DCACHE.series.forEach(function (r) { idx[r[0]] = r[1]; });
+function corrOf(intl, dates, closes) {
+  if (!intl || !intl.ok || !dates || !closes || dates.length < 20) return null;
+  var m = {};
+  dates.forEach(function (d, i) { m[d] = closes[i]; });
   var pairs = [];
   for (var i = 1; i < intl.dates.length; i++) {
     var d = intl.dates[i], dp = intl.dates[i - 1];
-    if (!isFinite(idx[d]) || !isFinite(idx[dp])) continue;
+    if (!isFinite(m[d]) || !isFinite(m[dp]) || m[dp] <= 0) continue;
     pairs.push([(intl.closes[i] - intl.closes[i - 1]) / intl.closes[i - 1] * 100,
-                (idx[d] - idx[dp]) / idx[dp] * 100]);
+                (m[d] - m[dp]) / m[dp] * 100]);
   }
   pairs = pairs.slice(-60);
   if (pairs.length < 12) return null;
@@ -1000,6 +1002,17 @@ function indexLink(intl) {
     cov += (p[0] - mx) * (p[1] - my); vx += Math.pow(p[0] - mx, 2); vy += Math.pow(p[1] - my, 2);
   });
   return { r: (vx > 0 && vy > 0) ? cov / Math.sqrt(vx * vy) : 0, n: n };
+}
+function indexLink(intl) {
+  var s = DCACHE.series || [];
+  if (!s.length) return null;
+  return corrOf(intl, s.map(function (r) { return r[0]; }), s.map(function (r) { return r[1]; }));
+}
+/* 費半 vs 台積電：比用大盤更能代表「電子股」的連動 */
+function stockLink(intl, code) {
+  var h = DCACHE.hist && DCACHE.hist[code];
+  if (!h || !h.rows || !h.rows.length) return null;
+  return corrOf(intl, h.rows.map(function (r) { return r[0]; }), h.rows.map(function (r) { return r[4]; }));
 }
 function adrPremium(intl) {
   if (!intl || !intl.byKey) return null;
@@ -2253,10 +2266,10 @@ function viewHome() {
 
   /* 類股熱力圖（需要產業對照表；沒有就先不顯示，避免出現假的「其他」一大格） */
   var inds = D.industryStats();
-  var realInds = inds.filter(function (x) { return x.ind !== '其他'; });
-  if (realInds.length >= 8) {
+  var dispInds = inds.filter(function (x) { return x.ind !== '其他' && x.n >= 8; });
+  if (dispInds.length >= 6) {
     h += sec('類股輪動（今天誰在動）', '<span class="mut2 tiny">點一下看內容</span>');
-    h += '<div class="card">' + CH.heat(inds.slice(0, 18)) + '<div class="note sm" style="margin-top:8px">顏色愈紅＝這個類股今天平均漲愈多，愈綠＝跌愈多。資金通常會在類股之間輪動，看懂誰在動比追個股更重要。</div></div>';
+    h += '<div class="card">' + CH.heat(dispInds.slice(0, 18)) + '<div class="note sm" style="margin-top:8px">顏色愈紅＝這個類股今天平均漲愈多，愈綠＝跌愈多（只列 8 檔以上的類股，避免少數股票影響判讀）。資金通常會在類股之間輪動，看懂誰在動比追個股更重要。</div></div>';
   } else {
     h += sec('類股輪動（今天誰在動）');
     h += '<div class="card"><div class="note sm">產業對照表目前抓不到（FinMind 額度暫時用完），類股輪動先隱藏。抓過一次會保留 30 天，之後不會再受影響。</div></div>';
@@ -2276,7 +2289,12 @@ function todayBullets(rg, snap) {
     var sox = intl.byKey.SOX;
     out.push('美股費城半導體最新 ' + T.fmt(sox.last, 0) + '（' + T.fmtPct(sox.pct) + '），' +
       (sox.pct > 0.5 ? '對台灣電子股是順風。' : sox.pct < -0.5 ? '台灣電子股今天開盤可能偏弱，不要急著追高。' : '對電子股影響不大。'));
-    if (intl.link) out.push('費半和台股的連動係數約 <b>' + T.fmt(intl.link.r, 2) + '</b>（1 代表完全同步），所以費半是台灣電子股最重要的隔夜指標。');
+    var lk = intl.linkStock || intl.link;
+    if (lk) {
+      out.push('費半和' + (intl.linkStock ? '台積電' : '加權指數') + '近 ' + lk.n + ' 個交易日的連動係數是 <b>' + T.fmt(lk.r, 2) +
+        '</b>：' + (lk.r > 0.6 ? '連動很高，睡前看費半就能大致掌握隔天電子股方向。' :
+          lk.r > 0.35 ? '連動中等，可以參考但不要只看它。' : '連動偏低，這段時間台股比較走自己的路。'));
+    }
   }
   var ap = D.adrPremium(intl);
   if (ap) out.push('台積電 ADR 換算回台股約 ' + T.fmtPx(ap.implied) + ' 元，比台股收盤 ' + T.fmtPx(ap.tw) + ' ' +
@@ -2327,8 +2345,11 @@ function intlCard() {
        '和最近的平均差不多，參考就好。') + '</div>';
     h += '<div class="mut2 tiny" style="margin-top:5px">ADR 溢價是「台灣人買不到、外資在美國買」的價差，通常長期存在；重點是看它比平常大還是小，而不是有沒有溢價。</div>';
   }
-  if (intl.link) h += '<div class="note sm" style="margin-top:8px">費城半導體與台股近 ' + intl.link.n + ' 個交易日的連動係數 <b>' + T.fmt(intl.link.r, 2) + '</b>。' +
-    (intl.link.r > 0.6 ? '連動很高，睡前看費半就能大致掌握隔天電子股方向。' : '連動中等，還要搭配匯率與其他指標一起看。') + '</div>';
+  if (intl.link) {
+    h += '<div class="note sm" style="margin-top:8px">費城半導體與台股近 ' + intl.link.n + ' 個交易日的連動係數 <b>' + T.fmt(intl.link.r, 2) + '</b>';
+    if (intl.linkStock) h += '（和台積電 ' + T.fmt(intl.linkStock.r, 2) + '）';
+    h += '。' + (intl.link.r > 0.6 ? '連動很高，睡前看費半就能大致掌握隔天電子股方向。' : '連動中等，還要搭配匯率與其他指標一起看。') + '</div>';
+  }
   h += '<div class="mut2 tiny" style="margin-top:6px">來源：' + T.esc(intl.src || '') + '，更新於 ' + new Date(intl.at).toLocaleTimeString('zh-TW', { hour: '2-digit', minute: '2-digit' }) + '</div>';
   h += '</div>';
   return h;
@@ -2353,11 +2374,13 @@ function simCard() {
   var s = SIM.stats();
   var h = sec('模擬帳戶', '<button class="btn sm ghost" data-act="tab" data-tab="sim">進入 ›</button>');
   var beat = isFinite(s.benchPct) ? s.pnlPct - s.benchPct : NaN;
+  var started = s.trades.length > 0;
   h += '<div class="card"><div class="row"><div><div class="mut sm">虛擬總資產</div><div class="big ' + toneCls(s.pnl) + '">' + T.fmtMoney(s.total) + '</div></div>' +
     '<span class="sp"></span><div class="r"><div class="' + toneCls(s.pnlPct) + '" style="font-weight:800">' + T.fmtPct(s.pnlPct) + '</div>' +
-    '<div class="mut2 tiny">' + (isFinite(beat) ? '同期大盤 ' + T.fmtPct(s.benchPct) + '，' + (beat >= 0 ? '贏 ' : '輸 ') + T.fmt(Math.abs(beat), 1) + '%' : '—') + '</div></div></div>' +
+    '<div class="mut2 tiny">' + (started && isFinite(beat) ? '同期大盤 ' + T.fmtPct(s.benchPct) + '，' + (beat >= 0 ? '贏 ' : '輸 ') + T.fmt(Math.abs(beat), 1) + '%' : '尚未開始交易') + '</div></div></div>' +
     '<div class="row tiny" style="margin-top:8px"><span class="chip info">持倉 ' + s.positions.length + ' 檔</span><span class="chip">現金 ' + T.fmtMoney(s.cash) + '</span>' +
-    (s.closedCount ? '<span class="chip">勝率 ' + T.fmt(s.winRate, 0) + '%</span>' : '') + '</div></div>';
+    (s.closedCount ? '<span class="chip">勝率 ' + T.fmt(s.winRate, 0) + '%</span>' : '') + '</div>' +
+    (started ? '' : '<div class="note sm" style="margin-top:8px">還沒下過單。先在選股頁挑一檔，用「模擬買進」練手感，不用真錢。</div>') + '</div>';
   return h;
 }
 
