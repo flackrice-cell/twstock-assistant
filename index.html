@@ -1733,13 +1733,22 @@ function ensure() {
   return T.S.sim;
 }
 
+/* 手機輸入容錯：把「1,000 股」「449abc」這種字串取成可靠的數字 */
+function numOf(v, kind) {
+  if (typeof v === 'number') return isFinite(v) ? v : NaN;
+  var s = String(v === null || v === undefined ? '' : v).replace(/,/g, '').trim();
+  var n = kind === 'int' ? parseInt(s, 10) : parseFloat(s);
+  return isFinite(n) ? n : NaN;
+}
+
 /* 買進（模擬）：價格未指定時用最新收盤價 */
 function buy(code, shares, price, note) {
   var sim = ensure();
-  shares = Math.floor(shares || 0);
-  if (!code || shares <= 0) return { ok: false, err: '請輸入股數' };
-  var px = price || priceOf(code);
-  if (!isFinite(px) || px <= 0) return { ok: false, err: '查不到成交價' };
+  shares = Math.floor(numOf(shares, 'int') || 0);
+  if (!code || !isFinite(shares) || shares <= 0) return { ok: false, err: '請輸入正確的股數（整數）' };
+  var px = numOf(price);
+  if (!isFinite(px) || px <= 0) px = priceOf(code);
+  if (!isFinite(px) || px <= 0) return { ok: false, err: '查不到成交價，請手動輸入' };
   var amount = px * shares;
   var fee = feeOf(amount);
   var need = Math.round(amount) + fee;
@@ -1769,11 +1778,13 @@ function sell(code, shares, price, note) {
   var pos = null, idx = -1;
   for (var i = 0; i < sim.positions.length; i++) if (sim.positions[i].code === code) { pos = sim.positions[i]; idx = i; }
   if (!pos) return { ok: false, err: '沒有這檔的模擬持股' };
-  shares = Math.floor(shares || pos.shares);
-  if (shares <= 0) return { ok: false, err: '請輸入股數' };
+  shares = numOf(shares, 'int');
+  if (!isFinite(shares) || shares <= 0) shares = pos.shares;
+  shares = Math.floor(shares);
   if (shares > pos.shares) shares = pos.shares;
-  var px = price || priceOf(code);
-  if (!isFinite(px) || px <= 0) return { ok: false, err: '查不到成交價' };
+  var px = numOf(price);
+  if (!isFinite(px) || px <= 0) px = priceOf(code);
+  if (!isFinite(px) || px <= 0) return { ok: false, err: '查不到成交價，請手動輸入' };
   var amount = px * shares;
   var fee = feeOf(amount), tax = taxOf(amount);
   var proceeds = Math.round(amount) - fee - tax;
@@ -1842,7 +1853,7 @@ function benchSince(iso) {
 
 window.SIM = {
   reset: reset, ensure: ensure, buy: buy, sell: sell, setPlan: setPlan,
-  stats: stats, priceOf: priceOf, priceDate: priceDate, feeOf: feeOf, taxOf: taxOf
+  stats: stats, priceOf: priceOf, priceDate: priceDate, feeOf: feeOf, taxOf: taxOf, numOf: numOf
 };
 })();
 
