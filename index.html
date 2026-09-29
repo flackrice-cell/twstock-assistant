@@ -230,11 +230,11 @@ textarea{-webkit-appearance:none;font-family:inherit}
 </header>
 <main id="view"></main>
 <nav id="tabs">
-  <button data-tab="home" class="on"><span class="ic">◎</span>總覽</button>
-  <button data-tab="hold"><span class="ic">▤</span>持股</button>
-  <button data-tab="pick"><span class="ic">✦</span>選股</button>
-  <button data-tab="sim"><span class="ic">🎯</span>模擬</button>
-  <button data-tab="cfg"><span class="ic">⚙</span>設定</button>
+  <button data-act="tab" data-tab="home" class="on"><span class="ic">◎</span>總覽</button>
+  <button data-act="tab" data-tab="hold"><span class="ic">▤</span>持股</button>
+  <button data-act="tab" data-tab="pick"><span class="ic">✦</span>選股</button>
+  <button data-act="tab" data-tab="sim"><span class="ic">🎯</span>模擬</button>
+  <button data-act="tab" data-tab="cfg"><span class="ic">⚙</span>設定</button>
 </nav>
 <div class="toast" id="toast"></div>
 <div id="modalRoot"></div>
@@ -374,10 +374,27 @@ function getJSON(url, timeoutMs) {
     var timer = setTimeout(function () { if (ctl) ctl.abort(); }, timeoutMs || 25000);
     fetch(url, { cache: 'no-store', signal: ctl ? ctl.signal : undefined })
       .then(function (r) {
-        if (!r.ok) throw new Error('HTTP ' + r.status);
-        return r.json();
+        /* 非 2xx 也把回應讀進來：FinMind 額度用完時是 HTTP 402，
+           但訊息在 JSON 內容裡（{status:402,msg:'Requests reach the upper limit'}），
+           不讀內容就沒辦法判斷是「額度用完」還是「真的壞掉」。 */
+        return r.text().then(function (txt) {
+          var j = null;
+          try { j = JSON.parse(txt); } catch (e) { j = null; }
+          if (!r.ok) {
+            var err = new Error('HTTP ' + r.status);
+            err.httpStatus = r.status;
+            err.body = j;
+            err.snippet = String(txt || '').slice(0, 160);
+            throw err;
+          }
+          if (j === null) {
+            var e2 = new Error('回應不是 JSON');
+            e2.snippet = String(txt || '').slice(0, 160);
+            throw e2;
+          }
+          resolve(j);
+        });
       })
-      .then(function (j) { clearTimeout(timer); resolve(j); })
       .catch(function (e) { clearTimeout(timer); reject(e); });
   });
 }
@@ -434,16 +451,23 @@ function fmPath(qs) {
   var t = T.S.cfg.finmindToken;
   return FINMIND + '?' + qs + (t ? '&token=' + encodeURIComponent(t) : '');
 }
+function fmLimitHit(j, err) {
+  var st = (err && err.httpStatus) || (j && j.status);
+  var msg = String((j && j.msg) || (err && err.body && err.body.msg) || '');
+  return st === 402 || (st === 400 && msg.indexOf('level') >= 0);
+}
+function fmSetLimit() {
+  FM_LIMIT.until = Date.now() + 15 * 60 * 1000;
+  FM_LIMIT.msg = 'FinMind 免費額度暫時用完，約 15 分鐘後恢復（已用快取資料）';
+}
 function fmFetch(url, timeout) {
   if (Date.now() < FM_LIMIT.until) return Promise.reject(new Error(FM_LIMIT.msg));
   return getJSON(url, timeout || 25000).then(function (j) {
-    var msg = String((j && j.msg) || '');
-    if (j && (j.status === 402 || (j.status === 400 && msg.indexOf('level') >= 0))) {
-      FM_LIMIT.until = Date.now() + 15 * 60 * 1000;
-      FM_LIMIT.msg = 'FinMind 免費額度暫時用完，約 15 分鐘後恢復（已用快取資料）';
-      throw new Error(FM_LIMIT.msg);
-    }
+    if (fmLimitHit(j, null)) { fmSetLimit(); throw new Error(FM_LIMIT.msg); }
     return j;
+  }, function (err) {
+    if (fmLimitHit(err && err.body, err)) fmSetLimit();
+    throw err;
   });
 }
 function fmLimited() { return Date.now() < FM_LIMIT.until; }
@@ -2149,8 +2173,10 @@ function renderHeader() {
       T.fmtPct(snap.index.pct) + '</span>');
   }
   if (snap && snap.breadth) out.push('<span class="chip">上漲 <b class="up">' + snap.breadth.up + '</b> / 下跌 <b class="dn">' + snap.breadth.down + '</b></span>');
-  out.push('<span class="chip ' + (rg.tone === 'bull' ? 'bull' : rg.tone === 'bear' ? 'bear' : 'warn') + '">' + T.esc(rg.state) +
-    ' · 建議曝險 <b>' + rg.exposure + '%</b></span>');
+  if (m && isFinite(m.close)) {
+    out.push('<span class="chip ' + (rg.tone === 'bull' ? 'bull' : rg.tone === 'bear' ? 'bear' : 'warn') + '">' + T.esc(rg.state) +
+      ' · 建議曝險 <b>' + rg.exposure + '%</b></span>');
+  }
   if (snap && snap.date) out.push('<span class="chip info">資料日 <b>' + T.esc(snap.date) + '</b></span>');
   if (D.fmLimited()) out.push('<span class="chip warn">FinMind 額度暫滿，用快取</span>');
   if (PROGRESS) out.push('<span class="chip"><span class="spin" style="width:11px;height:11px"></span>' + T.esc(PROGRESS) + '</span>');
@@ -3045,14 +3071,22 @@ function boot() {
   document.addEventListener('click', onClick);
   var rb = $('btnRefresh');
   if (rb) rb.addEventListener('click', function () { refreshAll(true); });
-  document.querySelectorAll('#tabs button').forEach(function (b) {
-    b.classList.toggle('on', b.getAttribute('data-tab') === S.tab);
+  /* 底部頁籤：直接綁監聽（不依賴事件委派，避免點不動） */
+  Array.prototype.forEach.call(document.querySelectorAll('#tabs button'), function (b) {
+    var t = b.getAttribute('data-tab');
+    if (!b.getAttribute('data-act')) b.setAttribute('data-act', 'tab');
+    b.classList.toggle('on', t === S.tab);
+    b.addEventListener('click', function (ev) {
+      if (ev && ev.stopPropagation) ev.stopPropagation();
+      setTab(t);
+      return false;
+    });
   });
   render();
   refreshAll(false);
 }
 
-window.UI = { render: render, openDetail: openDetail, doScan: doScan, refreshAll: refreshAll, toast: toast, boot: boot,
+window.UI = { render: render, setTab: setTab, openDetail: openDetail, doScan: doScan, refreshAll: refreshAll, toast: toast, boot: boot,
   analysisFor: analysisFor, histOf: histOf, chipOf: chipOf, nameOf: nameOf, addWatch: addWatch, saveHold: saveHold,
   get U() { return U; }, get PROGRESS() { return PROGRESS; }, get lastError() { return U.lastError; } };
 if (document.readyState === 'loading') document.addEventListener('DOMContentLoaded', boot);
