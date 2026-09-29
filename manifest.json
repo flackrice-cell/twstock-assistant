@@ -1,0 +1,16 @@
+{
+  "name": "台股決策助手",
+  "short_name": "台股助手",
+  "description": "台股盤後選股、持股追蹤、停損停利計算（資料來源：證交所、FinMind）",
+  "start_url": "./index.html",
+  "scope": "./",
+  "display": "standalone",
+  "orientation": "portrait",
+  "background_color": "#0b0f14",
+  "theme_color": "#0b0f14",
+  "lang": "zh-Hant",
+  "icons": [
+    { "src": "icon-192.png", "sizes": "192x192", "type": "image/png", "purpose": "any maskable" },
+    { "src": "icon-512.png", "sizes": "512x512", "type": "image/png", "purpose": "any maskable" }
+  ]
+}
